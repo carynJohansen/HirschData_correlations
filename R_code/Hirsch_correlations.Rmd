@@ -1,0 +1,358 @@
+---
+title: "Phenotype Correlations"
+author: "Caryn Johansen"
+date: "1/8/2017"
+output: html_document
+---
+
+### Introduction
+
+Purpose: The purpose for this script is to 1) explore and visualize the phenotype and expression data
+from Hirsch et al. and to create and visualize correlation matrices between each phenotype and the 
+expression data.
+
+**Paper citation:**
+
+Hirsch CN, Foerster JM, Johnson JM, Sekhon RS, Muttoni G, Vaillancourt B, Peñagaricano F, Lindquist E, Pedraza MA, Barry K, de Leon N, Kaeppler SM, Buell CR (2014) Insights into the maize pan-genome and pan-transcriptome. The Plant Cell 26(1): 121-135. http://dx.doi.org/10.1105/tpc.113.119982
+
+Paper is found at: http://www.plantcell.org/content/early/2014/01/31/tpc.113.119982.full.pdf+html
+
+Project directory:
+
+```{r}
+setwd("~/Dropbox/UCD/rotations/RRI/Hirsch_correlations/")
+```
+
+### Expression Data
+
+The FPKM data can be downloaded at http://datadryad.org/resource/doi:10.5061/dryad.r73c5
+
+Processing data:
+
+the downloaded data has an error-causing end-of-line quirk. Each line ends with "^I$" which is adding a final tab to each line. This is causing
+the file to input into R incorrectly. 
+
+in linux, the following command solves this error:
+
+```{r, eval=FALSE}
+sed 's/[[:blank:]]*$//' maize_503genotypes_raw_expression_values_FPKM_cleaned.txt > newfile.txt
+mv newfile.txt > maize_503genotypes_raw_expression_values_FPKM_cleaned.txt
+cat -vet maize_503genotypes_raw_expression_values_FPKM_cleaned.txt | less
+```
+
+use the last line to look at the end of the text lines for the '^I$', which should no longer be there.
+
+**Data here is are just genes with expression of at least 0.5 FPKM across all genes.**
+
+```{r}
+maize_exp <- read.table("../data/processed/maize_503genotypes_FPKM_expressed.txt", sep=" ", header=TRUE)
+```
+
+FPKM stand for Fragments Per Kilobase of transcript per Million mapped reads. Hirsch et al used
+cufflinks to determine gene expression levels, and the output was expressed in FPKM as oppossed to 
+RPKM. Cufflinks uses FPKM to avoid getting skewed expression values from paired-end sequencing (
+sometimes the other pair of the paired end is poor quality and does not map. Or, the reads might 
+be double counted. Cufflinks claims that counting fragments is more reliable and does not have these
+problems)
+
+**How do they come up with NA vs a zero?**
+
+**What does an NA mean?**
+
+**Are the NAs associatated with particular genes?**
+
+need to fix this - put in all genes
+```{r}
+#where are the NA's? Are there patterns to where they are located?
+exp.na <- maize_exp[!complete.cases(maize_exp),]
+#genes with NA's, and number of NA's
+
+na_counting_function <- function(v) {
+  sum(!complete.cases(v))
+}
+
+na.info <- data.frame(gene =exp.na$gene, num.Na = apply(exp.na, 1, na_counting_function))
+hist(na.info$num.Na, breaks=50)
+summary(na.info)
+hist(na.info$num.Na)
+
+na.info[na.info$num.Na == 503,]
+```
+
+No, except for one.
+
+**Distribution of fpkm**
+
+**Look for list of expressed genes, Figure 1c, cufflinks confidence interval**
+
+Just use the 18,000 genes,
+
+average phenotypes into single number per individual, average expression
+
+**SNP data**
+
+Don't need SNP data yet - not for WGCNA. Need SNP data for anything 
+
+###### FPKM distribution
+
+```{r}
+library(reshape2)
+
+str(maize_exp)
+
+#melt the fpkm into one column
+hist(maize_exp$A797NW, breaks=1000)
+exp.long <- melt(maize_exp, id=c("gene", "chromosome", "position_left", "position_right"))
+
+plot(density(exp.long$value, na.rm=TRUE))
+
+```
+
+### Phenotype Data
+
+if missing, pairwise deletion
+
+There are two sets of phenotypic data, the Supplemental Data Set 6, and the dataset acquired by Jeff from the authors:
+
+```{r}
+transition <- read.table("../data/processed/tpc119982SupplementalDS6_cleaned.csv", sep=",", header=T)
+phenotypes <- read.table("../data/processed/WIDIV_2010_paper_phenotypic_data_cleaned.csv", sep=",", header=T, na.strings = ".")
+
+#for pheotype data frame, year, rep, and no should be factors:
+phenotypes$Year <- as.factor(as.character(phenotypes$Year))
+phenotypes$Rep <- as.factor(as.character(phenotypes$Rep))
+phenotypes$No <- as.factor((phenotypes$No))
+
+str(phenotypes)
+str(transition)
+```
+
+### Phenotype summaries
+
+Looking at the phenotypes...
+
+The transition data show the days after planting of certain events (the last juvenile leaf, growing degree days until pollen shed, and 
+growing degree days until silk)
+
+
+```{r}
+library(ggplot2)
+
+transition2 <- transition[order(transition$Last.Juvenile.Leaf),]
+transition2$Genotype <- factor(transition2$Genotype, levels = transition2$Genotype[order(transition2$Last.Juvenile.Leaf)])
+
+transition_long <- melt(transition2, id.vars = "Genotype", 
+                        measure.vars = c("Last.Juvenile.Leaf", "Growing.Degree.Days.to.Pollen.Shed","Growing.Degree.Days.to.Silk"), value = TRUE)
+
+#with means
+means <- data.frame(mean = colMeans(transition[,2:4], na.rm = T))
+means$variable <- levels(transition_long$variable)
+
+ggplot(data = transition_long, aes(x=Genotype, y=value)) + geom_point() +
+  facet_grid(variable~., scale="free") +
+  geom_hline(aes(yintercept = mean), means)
+
+
+transition2 <- transition[order(transition$Growing.Degree.Days.to.Pollen.Shed),]
+transition2$Genotype <- factor(transition2$Genotype, levels = transition2$Genotype[order(transition2$Growing.Degree.Days.to.Pollen.Shed)])
+transition_long <- melt(transition2, id.vars = "Genotype", 
+                        measure.vars = c("Last.Juvenile.Leaf", "Growing.Degree.Days.to.Pollen.Shed","Growing.Degree.Days.to.Silk"), value = TRUE)
+
+ggplot(data = transition_long, aes(x=Genotype, y=value)) + geom_point() +
+  facet_grid(variable~., scale="free") +
+  geom_hline(aes(yintercept = mean), means)
+
+```
+
+Looking at the Phenotypes data:
+
+```{r}
+phenotypes2 <- phenotypes[,c(2,3,7:20)]
+phenotypes_long <- melt(phenotypes2, id.vars = c("Entry", "Rep"), measure.vars = names(phenotypes2)[3:16])
+
+ggplot(phenotypes_long, aes(x=variable, y=value)) + geom_boxplot() + theme(axis.text.x = element_text(angle=90, hjust=1))
+```
+
+Phenotype PCA
+
+```{r}
+library(ggplot2)
+phys.pc <- prcomp(na.omit(t(trait.phys)), center=TRUE)
+phys.pc.x <- data.frame(phys.pc$x)
+ggplot(phys.pc.x, aes(x=PC1, y=PC2)) + geom_point()
+```
+
+Combined the Phenotypes into one data frame
+
+```{r}
+traitData <- read.table("data/processed/maize_g_nT.csv", sep=",",header=T, row.names = 1)
+```
+
+### Correlations between phenotypes and Gene Expression data
+
+A correlation matrix can be used to show if there there is correlation between gene expression of certain genes
+and phenotypes...
+
+Things to think about:
+
+To calculate a pearson correlation coefficient:
+
+$$r = \frac{\sum(x-m_x)(y-m_y)}{\sqrt\sum(x - m_x)^2(y-m_y)^2}$$
+
+Where x and y are two vectors of the same length, and $m_x$ and $m_y$ are the means of x and y.
+(Spearman is this, but the difference between the rank of x and y variables.)
+
+So, I think, to get a proper correlation, I would need to calculate the mean genetic value for the expression data?... Which I do not currently have the data for.
+
+All by all correlation?
+
+**meeting notes**
+
+Average by line, get the single number 
+
+48...+13 x 48...+13 matrix, looking at the peripheries
+
+Do it pairwise....
+
+**obs = pairwise complete**
+
+how do phenotypes relate to the expression data.
+
+imputing missing data?
+
+**visualiize: historgram of r^2 values for each of the phenotypes**
+
+**correlations among the phenotypes**
+
+**pca on the phenotypes**
+
+**eigen phenotypes**
+
+**correlation with and without zeros**
+
+**possibly transform with quantile organization, might be good for expression data get**
+
+**for phenotypes, look at them individually to transform. If they're not normal, do a log**
+**transformation probably. Or, fit a model of environment (different years) and see if the**
+**residuals are normally distributed. But first, just average**
+
+
+structure of hte gene expression and the phenotypes
+
+How does it affect GWAS
+
+```{r}
+library(gplots)
+
+traitData <- read.table("data/processed/maize_g_nT.csv", sep=",",header=T, row.names = 1)
+
+
+small <- traitData[1:10,1:20]
+
+small.cor <- cor(t(small), method="pearson", use="complete.obs")
+heatmap.2(small.cor, trace="none", Colv = "none", Rowv=F, dendrogram = "none")
+
+small.cor.phy <- small.cor[1:17, 1:17]
+heatmap.2(small.cor.phy, trace="none")
+sml.cor.l <- unlist(small.cor)
+hist(sml.cor.l)
+#z-score 
+
+#phenotype correlation
+trait.phys <- traitData[1:17,]
+trait.phys$trait <- row.names(trait.phys)
+trait.phys.m <- melt(trait.phys, id.vars = "trait")
+trait.phys.w <- reshape(trait.phys.m, idvar = "variable", timevar="trait", direction="wide")
+#trait.phys <- t(trait.phys)
+
+ggplot(trait.phys.m, aes(x=value, y=..density..)) +
+  geom_histogram() +
+  facet_wrap(~ trait, scale="free")
+
+#ggplot(trait.phys.m, aes(x=log(value), y=..density..)) +
+#  geom_histogram() +
+#  facet_wrap(~ trait, scale="free")
+
+#Trait PCA
+
+#remove NA columns
+col.na <-apply(apply(trait.phys, 2, complete.cases), 2, sum)
+trait.phys.c <- trait.phys[,col.na == 17]
+col.na2 <- apply(apply(trait.phys.c, 2, complete.cases), 2, sum)
+
+trait.pca <- prcomp(na.omit(trait.phys.w[,2:18]), center=TRUE, scale.=TRUE)
+trait.pca.x <- as.data.frame(trait.pca$x)
+
+trait.pca <- prcomp(trait.phys.c[,1:244], center=T, scale.=TRUE)
+trait.pca.x <- as.data.frame(trait.pca$x)
+qplot(x=PC1, y=PC2, data=trait.pca.x, colour=rownames(trait.pca.x))
+qplot(x=PC1, y=PC3, data=trait.pca.x, colour=rownames(trait.pca.x))
+qplot(x=PC2, y=PC3, data=trait.pca.x, colour=rownames(trait.pca.x))
+
+gty <- trait.phys.w[complete.cases(trait.phys.w),]$variable
+trait.pca.x$genotype <- gty
+
+pc1.2 <- qplot(z=PC1, y=PC2, data=trait.pca.x, colour=factor(gty))
+
+phys.cor <- cor(t(trait.phys), method="pearson", use="complete.obs")
+
+heatmap.2(phys.cor, trace="none")
+
+
+
+#exp_cor <- cor(exp, method="pearson", use="complete")
+```
+
+Correlation code:
+
+(This was done on farm)
+```{r, eval=FALSE}
+traitData <- read.table("data/processed/maize_g_nT.csv", sep=",",header=T, row.names = 1)
+
+#cor on data to l
+trait.cor.full <- cor(t(traitData), method="pearson", use="complete.obs")
+
+#write this as a table
+write.table(trait.cor.full, file="maize_g_nT_cor.csv", quote=FALSE, sep=",")
+
+trait.cor.17 <- read.table("maize_g_nT_cor.csv", sep=",", header=T, row.names = 1, nrows = 17)
+write.table(trait.cor.17, file="data/maize_g_nT_cor17.csv", sep=",", quote=FALSE)
+```
+
+```{r}
+phy.cor <- read.table("data/processed/maize_g_nT_cor17.csv", sep=",")
+#heatmap.2(as.matrix(phy.cor, trace="none", Colv = "none", Rowv=F, dendrogram = "none")
+
+#just the physiological traits
+phys <- phy.cor[,1:17]
+phys2 <- phys
+phys2$trait <- rownames(phys2)
+phy.l <- melt(phys2, id.vars="trait")
+heatmap.2(as.matrix(phys), trace="none")
+
+ggplot(phy.l, aes(x=value, y=..density..)) +
+  geom_histogram() +
+  facet_wrap(~ trait, scale="fixed")
+
+# just the genetic traits
+genes.cor <- phy.cor[,18:15223]
+heatmap.2(as.matrix(genes.cor), trace="none")
+
+genes.cor2 <- genes.cor
+genes.cor2$trait <- rownames(genes.cor2)
+genes.l <- melt(genes.cor2, id.vars="trait")
+
+ggplot(genes.l, aes(x=value, y=..density..)) +
+  geom_histogram() +
+  facet_wrap(~ trait, scale="fixed")
+
+ggplot(genes.l, aes(x=value, y=..density..)) +
+  geom_histogram() +
+  facet_wrap(~ variable, scale="fixed")
+
+```
+
+SLURM in the lab docs
+
+Next week: slides for the data
+Look through papers for next week - decide on which paper to present - more in Berg and Coop stuff?
