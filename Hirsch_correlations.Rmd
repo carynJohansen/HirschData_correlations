@@ -45,7 +45,7 @@ use the last line to look at the end of the text lines for the '^I$', which shou
 **Data here is are just genes with expression of at least 0.5 FPKM across all genes.**
 
 ```{r}
-maize_exp <- read.table("../data/processed/maize_503genotypes_FPKM_expressed.txt", sep=" ", header=TRUE)
+maize_exp <- read.table("../data/processed/maize_503genotypes_raw_expression_values_FPKM_cleaned.txt", sep=" ", header=TRUE)
 ```
 
 FPKM stand for Fragments Per Kilobase of transcript per Million mapped reads. Hirsch et al used
@@ -78,8 +78,17 @@ hist(na.info$num.Na)
 
 na.info[na.info$num.Na == 503,]
 ```
-
 No, except for one.
+
+Just want genes that are expressed in all of the samples
+
+```{r}
+maize_exp <- maize_exp[,c(1,5:507)]
+
+maize_exp <- maize_exp[rowSums(maize_exp[,2:504] <= 0.5) == 0,]
+#write.table(maize_exp, file=""data/processed/maize_503genotypes_FPKM_expressed.txt", quote = F, row.names = F, col.names = T
+maize_exp <- read.table("data/processed/maize_503genotypes_FPKM_expressed.txt", sep=" ", header=TRUE)
+```
 
 **Distribution of fpkm**
 
@@ -102,7 +111,11 @@ str(maize_exp)
 
 #melt the fpkm into one column
 hist(maize_exp$A797NW, breaks=1000)
-exp.long <- melt(maize_exp, id=c("gene", "chromosome", "position_left", "position_right"))
+exp.long <- melt(maize_exp, id="gene")
+
+ggplot(exp.long, aes(x=value, y=..density..)) +
+  geom_histogram(bins=1000) +
+  geom_vline(aes(xintercept = mean(exp.long$value, na.rm=T), colour="red"))
 
 plot(density(exp.long$value, na.rm=TRUE))
 
@@ -173,6 +186,30 @@ phenotypes_long <- melt(phenotypes2, id.vars = c("Entry", "Rep"), measure.vars =
 ggplot(phenotypes_long, aes(x=variable, y=value)) + geom_boxplot() + theme(axis.text.x = element_text(angle=90, hjust=1))
 ```
 
+
+Combined the Phenotypes into one data frame
+
+**for phenotypes, look at them individually to transform. If they're not normal, do a log**
+**transformation probably. Or, fit a model of environment (different years) and see if the**
+**residuals are normally distributed. But first, just average**
+
+```{r}
+library(gplots)
+
+traitData <- read.table("data/processed/maize_g_nT.csv", sep=",",header=T, row.names = 1)
+
+#phenotype distribution
+trait.phys <- traitData[1:17,]
+trait.phys$trait <- row.names(trait.phys)
+trait.phys.m <- melt(trait.phys, id.vars = "trait")
+trait.phys.w <- reshape(trait.phys.m, idvar = "variable", timevar="trait", direction="wide")
+#trait.phys <- t(trait.phys)
+
+ggplot(trait.phys.m, aes(x=value, y=..density..)) +
+  geom_histogram() +
+  facet_wrap(~ trait, scale="free")
+```
+
 Phenotype PCA
 
 ```{r}
@@ -180,12 +217,23 @@ library(ggplot2)
 phys.pc <- prcomp(na.omit(t(trait.phys)), center=TRUE)
 phys.pc.x <- data.frame(phys.pc$x)
 ggplot(phys.pc.x, aes(x=PC1, y=PC2)) + geom_point()
-```
 
-Combined the Phenotypes into one data frame
+#remove NA columns
+col.na <-apply(apply(trait.phys, 2, complete.cases), 2, sum)
+trait.phys.c <- trait.phys[,col.na == 17]
+col.na2 <- apply(apply(trait.phys.c, 2, complete.cases), 2, sum)
 
-```{r}
-traitData <- read.table("data/processed/maize_g_nT.csv", sep=",",header=T, row.names = 1)
+trait.pca <- prcomp(na.omit(trait.phys.w[,2:18]), center=TRUE, scale.=TRUE)
+trait.pca.x <- as.data.frame(trait.pca$x)
+gty <- trait.phys.w[complete.cases(trait.phys.w),]$variable
+trait.pca.x$genotype <- gty
+
+
+trait.pca <- prcomp(trait.phys.c[,1:244], center=T, scale.=TRUE)
+trait.pca.x <- as.data.frame(trait.pca$x)
+qplot(x=PC1, y=PC2, data=trait.pca.x, colour=rownames(trait.pca.x))
+qplot(x=PC1, y=PC3, data=trait.pca.x, colour=rownames(trait.pca.x))
+qplot(x=PC2, y=PC3, data=trait.pca.x, colour=rownames(trait.pca.x))
 ```
 
 ### Correlations between phenotypes and Gene Expression data
@@ -232,76 +280,12 @@ imputing missing data?
 
 **possibly transform with quantile organization, might be good for expression data get**
 
-**for phenotypes, look at them individually to transform. If they're not normal, do a log**
-**transformation probably. Or, fit a model of environment (different years) and see if the**
-**residuals are normally distributed. But first, just average**
 
 
 structure of hte gene expression and the phenotypes
 
 How does it affect GWAS
 
-```{r}
-library(gplots)
-
-traitData <- read.table("data/processed/maize_g_nT.csv", sep=",",header=T, row.names = 1)
-
-
-small <- traitData[1:10,1:20]
-
-small.cor <- cor(t(small), method="pearson", use="complete.obs")
-heatmap.2(small.cor, trace="none", Colv = "none", Rowv=F, dendrogram = "none")
-
-small.cor.phy <- small.cor[1:17, 1:17]
-heatmap.2(small.cor.phy, trace="none")
-sml.cor.l <- unlist(small.cor)
-hist(sml.cor.l)
-#z-score 
-
-#phenotype correlation
-trait.phys <- traitData[1:17,]
-trait.phys$trait <- row.names(trait.phys)
-trait.phys.m <- melt(trait.phys, id.vars = "trait")
-trait.phys.w <- reshape(trait.phys.m, idvar = "variable", timevar="trait", direction="wide")
-#trait.phys <- t(trait.phys)
-
-ggplot(trait.phys.m, aes(x=value, y=..density..)) +
-  geom_histogram() +
-  facet_wrap(~ trait, scale="free")
-
-#ggplot(trait.phys.m, aes(x=log(value), y=..density..)) +
-#  geom_histogram() +
-#  facet_wrap(~ trait, scale="free")
-
-#Trait PCA
-
-#remove NA columns
-col.na <-apply(apply(trait.phys, 2, complete.cases), 2, sum)
-trait.phys.c <- trait.phys[,col.na == 17]
-col.na2 <- apply(apply(trait.phys.c, 2, complete.cases), 2, sum)
-
-trait.pca <- prcomp(na.omit(trait.phys.w[,2:18]), center=TRUE, scale.=TRUE)
-trait.pca.x <- as.data.frame(trait.pca$x)
-
-trait.pca <- prcomp(trait.phys.c[,1:244], center=T, scale.=TRUE)
-trait.pca.x <- as.data.frame(trait.pca$x)
-qplot(x=PC1, y=PC2, data=trait.pca.x, colour=rownames(trait.pca.x))
-qplot(x=PC1, y=PC3, data=trait.pca.x, colour=rownames(trait.pca.x))
-qplot(x=PC2, y=PC3, data=trait.pca.x, colour=rownames(trait.pca.x))
-
-gty <- trait.phys.w[complete.cases(trait.phys.w),]$variable
-trait.pca.x$genotype <- gty
-
-pc1.2 <- qplot(z=PC1, y=PC2, data=trait.pca.x, colour=factor(gty))
-
-phys.cor <- cor(t(trait.phys), method="pearson", use="complete.obs")
-
-heatmap.2(phys.cor, trace="none")
-
-
-
-#exp_cor <- cor(exp, method="pearson", use="complete")
-```
 
 Correlation code:
 
@@ -346,9 +330,9 @@ ggplot(genes.l, aes(x=value, y=..density..)) +
   geom_histogram() +
   facet_wrap(~ trait, scale="fixed")
 
-ggplot(genes.l, aes(x=value, y=..density..)) +
-  geom_histogram() +
-  facet_wrap(~ variable, scale="fixed")
+#ggplot(genes.l, aes(x=value, y=..density..)) +
+#  geom_histogram() +
+#  facet_wrap(~ variable, scale="fixed")
 
 ```
 
